@@ -129,12 +129,26 @@ app.get('/auth/user', (req, res) => {
 
 // --- Real-time code sharing with per-room state ---
 const roomCodeState = {};
+// Track connected members per room for presence sync
+const roomMembers = {};
 
 io.on('connection', (socket) => {
-  console.log('New client connected');
+  console.log('New client connected:', socket.id);
+  socket.currentRoom = null;
 
   socket.on('join-room', ({ roomId, language }) => {
+    console.log(`Socket ${socket.id} joining room: ${roomId}`);
+    
+    // Leave previous room if exists
+    if (socket.currentRoom) {
+      socket.leave(socket.currentRoom);
+      console.log(`Socket ${socket.id} left room: ${socket.currentRoom}`);
+    }
+    
+    // Join new room
     socket.join(roomId);
+    socket.currentRoom = roomId;
+    
     // If the room has no code, set to starter code for language
     if (!roomCodeState[roomId]) {
       const STARTER_CODE = {
@@ -144,8 +158,29 @@ io.on('connection', (socket) => {
         cpp: '#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}',
       };
       roomCodeState[roomId] = STARTER_CODE[language] || '';
+      console.log(`Initialized room ${roomId} with ${language} starter code`);
     }
+    
+    // Send current room code to the joining user
     socket.emit('code-update', roomCodeState[roomId]);
+    
+    // Confirm successful room join
+    socket.emit('room-joined', { roomId, success: true, members: Array.from(roomMembers[roomId]) });
+    
+    // Track members per room
+    if (!roomMembers[roomId]) {
+      roomMembers[roomId] = new Set();
+    }
+    roomMembers[roomId].add(socket.id);
+
+    // Notify everyone in the room (including the new user) about the join
+    io.in(roomId).emit('user-joined', {
+      userId: socket.id,
+      roomId,
+      members: Array.from(roomMembers[roomId])
+    });
+    
+    console.log(`Socket ${socket.id} successfully joined room: ${roomId}`);
   });
 
   // User cursor sync
@@ -159,8 +194,21 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log('Client disconnected');
-    // Optionally: broadcast cursor removal
+    console.log('Client disconnected:', socket.id);
+    
+    // Notify room members about user leaving
+    if (socket.currentRoom) {
+      // Remove from room member tracking
+      if (roomMembers[socket.currentRoom]) {
+        roomMembers[socket.currentRoom].delete(socket.id);
+      }
+      io.in(socket.currentRoom).emit('user-left', {
+        userId: socket.id,
+        roomId: socket.currentRoom,
+        members: Array.from(roomMembers[socket.currentRoom] || [])
+      });
+      console.log(`Socket ${socket.id} left room ${socket.currentRoom} due to disconnect`);
+    }
   });
 });
 

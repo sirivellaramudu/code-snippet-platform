@@ -46,13 +46,47 @@ function App() {
   }, [language]);
 
   useEffect(() => {
-    socket.connect();
-    socket.emit('join-room', { roomId, language });
+    const joinRoom = () => {
+      console.log(`Attempting to join room: ${roomId}`);
+      socket.emit('join-room', { roomId, language });
+    };
+
+    // Ensure socket is connected before joining room
+    if (socket.connected) {
+      joinRoom();
+    } else {
+      socket.connect();
+      socket.on('connect', () => {
+        console.log('Socket connected, joining room');
+        joinRoom();
+      });
+    }
+
+    // Handle room join confirmation
+    socket.on('room-joined', ({ roomId: joinedRoom, success, members = [] }) => {
+      if (success) {
+        console.log(`Successfully joined room: ${joinedRoom}`);
+      }
+      // Initialize presence list with other members in room
+      setPresence(prev => {
+        const updated = { ...prev };
+        members.forEach(id => {
+          if (id !== socket.id && !updated[id]) {
+            updated[id] = { label: 'User', color: '#888', lastSeen: Date.now() };
+          }
+        });
+        return updated;
+      });
+    });
+
+    // Handle code updates from other users
     socket.on('code-update', remoteCode => {
       ignoreRemote.current = true;
       lastRemoteCode.current = remoteCode;
       setCode(typeof remoteCode === 'string' ? remoteCode : '');
     });
+
+    // Handle cursor updates from other users
     socket.on('cursor-update', ({ userId: remoteId, position, color, label }) => {
       setRemoteCursors(prev => {
         // Remove any old cursor for this user
@@ -64,12 +98,45 @@ function App() {
         [remoteId]: { label, color, lastSeen: Date.now() }
       }));
     });
+
+    // Handle user join/leave notifications
+    socket.on('user-joined', ({ userId, roomId: joinedRoom, members = [] }) => {
+      console.log(`User ${userId} joined room ${joinedRoom}`);
+      if (userId !== socket.id) {
+        setPresence(prev => ({
+          ...prev,
+          [userId]: {
+            label: 'User',
+            color: '#888',
+            lastSeen: Date.now()
+          }
+        }));
+      }
+    });
+
+    socket.on('user-left', ({ userId, roomId: leftRoom }) => {
+      console.log(`User ${userId} left room ${leftRoom}`);
+      // Remove their cursor and presence
+      setRemoteCursors(prev => prev.filter(c => c.userId !== userId));
+      setPresence(prev => {
+        const updated = { ...prev };
+        delete updated[userId];
+        return updated;
+      });
+    });
+
     return () => {
+      // Clear presence and cursor state when leaving room
+      setPresence({});
+      setRemoteCursors([]);
+      socket.off('room-joined');
       socket.off('code-update');
       socket.off('cursor-update');
-      // Do not disconnect socket, just leave room
+      socket.off('user-joined');
+      socket.off('user-left');
+      socket.off('connect');
     };
-  }, [roomId]);
+  }, [roomId, language]);
 
   // Emit code changes to others
   useEffect(() => {
