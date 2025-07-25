@@ -1,0 +1,7 @@
+[build]
+  publish = "client/build"
+  command = "npm run build --prefix client"
+
+[dev]
+  command = "npm start --prefix client"
+  port = 3000
