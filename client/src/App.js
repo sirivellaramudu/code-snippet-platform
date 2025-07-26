@@ -9,6 +9,9 @@ import axios from 'axios';
 import { socket } from './socket';
 import { v4 as uuidv4 } from 'uuid';
 
+// Base URL for backend (set in Netlify env as REACT_APP_BASE_URL)
+const API_BASE = (process.env.REACT_APP_BASE_URL || '').replace(/\/$/, '');
+
 function App() {
   const [roomId, setRoomId] = useState('default');
   const [roomInput, setRoomInput] = useState('default');
@@ -42,8 +45,7 @@ function App() {
       }
       lastLang.current = language;
     }
-    // eslint-disable-next-line
-  }, [language]);
+  }, [language, roomId, code]);
 
   useEffect(() => {
     const joinRoom = () => {
@@ -147,11 +149,11 @@ function App() {
     if (code !== lastRemoteCode.current) {
       socket.emit('code-change', { roomId, code: code || '' });
     }
-  }, [code]);
+  }, [code, roomId]);
 
   useEffect(() => {
     // Fetch user info on load
-    axios.get('http://localhost:4000/auth/user', { withCredentials: true })
+    axios.get(`${API_BASE}/auth/user`, { withCredentials: true })
       .then(res => {
         setUser(res.data);
         setLoading(false);
@@ -168,7 +170,7 @@ function App() {
       return;
     }
     try {
-      const response = await axios.post('http://localhost:4000/execute', {
+      const response = await axios.post(`${API_BASE}/execute`, {
         script: code,
         language,
         versionIndex: '0',
@@ -180,11 +182,11 @@ function App() {
   };
 
   const handleLogin = (provider) => {
-    window.location.href = `http://localhost:4000/auth/${provider}`;
+    window.location.href = `${API_BASE}/auth/${provider}`;
   };
 
   const handleLogout = () => {
-    window.location.href = 'http://localhost:4000/auth/logout';
+    window.location.href = `${API_BASE}/auth/logout`;
   };
 
   return (
